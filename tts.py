@@ -24,7 +24,13 @@ DEFAULT_VOICE = {
     'Yunxi-云希': 'zh-CN-YunxiNeural',
     'Yunxia-云夏': 'zh-CN-YunxiaNeural',
     'liaoning-Xiaobei-晓北辽宁': 'zh-CN-liaoning-XiaobeiNeural',
-    'shaanxi-Xiaoni-陕西晓妮': 'zh-CN-shaanxi-XiaoniNeural'
+    'shaanxi-Xiaoni-陕西晓妮': 'zh-CN-shaanxi-XiaoniNeural',
+
+    # 新增英文发音人
+    'Ava (English US)': 'en-US-AvaNeural',
+    'Andrew (English US)': 'en-US-AndrewNeural',
+    'Emma (English US)': 'en-US-EmmaNeural',
+    'Brian (English UK)': 'en-GB-BrianNeural'
 }
 
 MAX_SEGMENT_LENGTH = 1000  # 设置每个文本段的最大长度
@@ -374,3 +380,4 @@ if __name__ == '__main__':
     ex = TTSApp()
     ex.show()
     sys.exit(app.exec_())
+
