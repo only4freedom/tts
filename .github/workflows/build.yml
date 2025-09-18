@@ -23,7 +23,7 @@ jobs:
 
     - name: Build exe
       run: |
-        pyinstaller --onefile --noconsole --hidden-import lameenc --hidden-import PyQt5.sip your_file.py
+        pyinstaller --onefile --noconsole --hidden-import lameenc --hidden-import PyQt5.sip tts.py
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
