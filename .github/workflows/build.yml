@@ -1,33 +1,36 @@
 name: Build EXE
 
 on:
-  workflow_dispatch:   # 手动触发
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
     - name: Install dependencies
       run: |
-        pip install --upgrade pip
-        pip install pyinstaller pyqt5 edge-tts lameenc
+        python -m pip install --upgrade pip
+        pip install pyqt5 edge-tts lameenc pyinstaller
 
-    - name: Build exe
+    - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --hidden-import lameenc --hidden-import PyQt5.sip tts.py
+        pyinstaller --onefile --windowed your_script.py
+      # 注意：your_script.py 替换成你的 Python 文件名
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v3
       with:
-        name: exe-build
+        name: tts-exe
         path: dist/*.exe
-
