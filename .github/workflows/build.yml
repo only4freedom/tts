@@ -19,15 +19,21 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install pyqt5 edge-tts lameenc pyinstaller
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed tts.py
-        # 注意：tts_app.py 改成你的 Python 文件名
+        pyinstaller --clean --onefile --windowed \
+          --hidden-import=PyQt5.QtCore \
+          --hidden-import=PyQt5.QtGui \
+          --hidden-import=PyQt5.QtWidgets \
+          tts.py
+        # 注意：tts_app.py 替换成你的 Python 文件名
 
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
