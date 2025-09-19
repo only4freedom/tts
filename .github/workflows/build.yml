@@ -26,11 +26,11 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --windowed your_script.py
-      # 注意：your_script.py 替换成你的 Python 文件名
+        pyinstaller --onefile --windowed tts.py
+        # 注意：tts_app.py 改成你的 Python 文件名
 
     - name: Upload EXE artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: tts-exe
         path: dist/*.exe
