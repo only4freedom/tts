@@ -13,10 +13,10 @@ jobs:
     
     steps:
     - name: 检出代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: 设置 Python 环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     
@@ -33,7 +33,7 @@ jobs:
         pyinstaller --onefile --windowed --name="文字转语音工具" --hidden-import=edge_tts --hidden-import=lameenc --hidden-import=asyncio --hidden-import=PyQt5.QtCore --hidden-import=PyQt5.QtGui --hidden-import=PyQt5.QtWidgets --hidden-import=PyQt5.QtMultimedia --clean tts_app.py
     
     - name: 上传构建产物
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: TTS-Tool-Windows
         path: dist/文字转语音工具.exe
@@ -41,7 +41,7 @@ jobs:
     
     - name: 创建 Release (如果是 tag)
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: dist/文字转语音工具.exe
       env:
