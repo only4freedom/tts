@@ -204,9 +204,19 @@ class TTSApp(QWidget):
         proxy_layout = QHBoxLayout()
         self.proxy_checkbox = QCheckBox('使用代理')
         self.proxy_checkbox.setChecked(True)  # 默认启用
-        self.proxy_input = QLineEdit('http://127.0.0.1:1080')
-        self.proxy_input.setPlaceholderText('代理地址（如：http://127.0.0.1:1080）')
+        
+        # 代理类型选择
+        self.proxy_type_combo = QComboBox()
+        self.proxy_type_combo.addItems(['HTTP', 'SOCKS5'])
+        self.proxy_type_combo.setMaximumWidth(100)
+        
+        self.proxy_input = QLineEdit('127.0.0.1:1080')
+        self.proxy_input.setPlaceholderText('代理地址（如：127.0.0.1:1080）')
+        
         proxy_layout.addWidget(self.proxy_checkbox)
+        proxy_layout.addWidget(QLabel('类型:'))
+        proxy_layout.addWidget(self.proxy_type_combo)
+        proxy_layout.addWidget(QLabel('地址:'))
         proxy_layout.addWidget(self.proxy_input)
         self.layout.addLayout(proxy_layout)
 
