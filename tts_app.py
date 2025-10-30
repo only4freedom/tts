@@ -11,7 +11,7 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtGui import QFont
 import edge_tts
 import lameenc
-from edge_tts import SubMaker  # 导入官方推荐的 SSML 构建工具
+from xml.sax.saxutils import escape
 
 # --- 全局设置 ---
 OUTPUT_FILE = "output.mp3"
@@ -76,80 +76,60 @@ XIAOXIAO_STYLES = {
 }
 
 
-def generate_silence(duration_ms, sample_rate=24000, bit_depth=16):
-    """生成指定时长的静音音频"""
-    num_frames = int(sample_rate * duration_ms / 1000)
-    silent_frame = b'\x00' * (bit_depth // 8) * num_frames
-
-    encoder = lameenc.Encoder()
-    encoder.set_channels(1)
-    encoder.set_in_sample_rate(sample_rate)
-    encoder.set_bit_rate(128)
-    encoder.set_out_sample_rate(sample_rate)
-    encoder.set_quality(2)
-
-    mp3_data = encoder.encode(silent_frame)
-    mp3_data += encoder.flush()
-
-    return mp3_data
-
-
-async def process_text_segment(segment, voice, rate, pitch, style=None):
-    """
-    【最终修正版】使用官方 SubMaker 构建 SSML，确保风格、语速、音调被正确解析。
-    """
-    rate_str = f"{rate * 5:+d}%"
-    pitch_str = f"{pitch * 5:+d}Hz"
-    
-    # 使用 SubMaker 来安全地构建 SSML
-    sub_maker = SubMaker()
-    
-    # 【修正点】使用 .append() 方法，而不是 .add_sub()
-    sub_maker.append(edge_tts.VoiceCommand(voice, rate=rate_str, pitch=pitch_str))
-    if style:
-        sub_maker.append(edge_tts.StyleCommand(style))
-    sub_maker.append(edge_tts.TextCommand(segment))
-    
-    # 将 SubMaker 对象转换为最终的 SSML 字符串
-    final_ssml = sub_maker.to_ssml()
-    
-    # 在创建 Communicate 对象时传入 SSML 文本
-    communicate = edge_tts.Communicate(final_ssml)
-    
-    segment_audio = b''
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            segment_audio += chunk["data"]
-            
-    return segment_audio
-
-
 async def run_tts(text, voice, rate, pitch, style, finished_callback):
-    """运行TTS转换"""
-    # 按照停顿标记分割文本
-    segments = re.split(r'(\{pause=\d+\})', text)
-    combined_audio = b''
-    
+    """
+    【最终修正版】运行TTS转换。
+    这次，我们先构建一个完整的 SSML 字符串，再一次性传递给 Communicate。
+    """
     try:
-        for segment in segments:
-            if re.match(r'(\{pause=\d+\}', segment):
-                # 处理停顿
-                pause_duration = int(re.search(r'\d+', segment).group())
-                # 使用 to_thread 在异步函数中运行同步的 lameenc 代码
-                silence = await asyncio.to_thread(generate_silence, pause_duration)
-                combined_audio += silence
-            elif segment.strip():  # 只处理非空段落
-                # 处理文本段落
-                segment_audio = await process_text_segment(segment, voice, rate, pitch, style)
-                combined_audio += segment_audio
+        # 1. 将UI滑块值转换为SSML需要的格式
+        rate_str = f"{rate * 5:+d}%"
+        pitch_str = f"{pitch * 5:+d}Hz"
 
-        # 将合并后的音频写入文件
+        # 2. 构建SSML的开头部分
+        final_ssml = (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+            f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">'
+            f'<voice name="{voice}">'
+            # 将 prosody 标签包裹在最外层，控制全局语速和音调
+            f'<prosody rate="{rate_str}" pitch="{pitch_str}">'
+        )
+
+        # 3. 智能地处理文本和停顿，插入到SSML中
+        segments = re.split(r'(\{pause=\d+\})', text)
+        for segment in segments:
+            if re.match(r'(\{pause=\d+\})', segment):
+                # 插入SSML的停顿标签 <break>
+                pause_duration = int(re.search(r'\d+', segment).group())
+                final_ssml += f'<break time="{pause_duration}ms"/>'
+            elif segment.strip():
+                # 对文本进行XML转义
+                escaped_segment = escape(segment)
+                # 如果有风格，则包裹风格标签
+                if style:
+                    final_ssml += f'<mstts:express-as style="{style}">{escaped_segment}</mstts:express-as>'
+                else:
+                    final_ssml += escaped_segment
+        
+        # 4. 闭合所有SSML标签
+        final_ssml += '</prosody></voice></speak>'
+
+        # 5. 将构建好的完整SSML字符串传递给Communicate
+        communicate = edge_tts.Communicate(final_ssml)
+        
+        # 6. 流式写入文件
         with open(OUTPUT_FILE, "wb") as f:
-            f.write(combined_audio)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    f.write(chunk["data"])
 
         finished_callback("语音生成完毕！")
-        
+
     except Exception as e:
+        # 捕获并显示更详细的错误
+        import traceback
+        error_info = traceback.format_exc()
+        print(error_info) # 在控制台打印详细错误，方便调试
         finished_callback(f"生成失败：{str(e)}")
 
 
@@ -167,7 +147,6 @@ class TTSWorker(QThread):
 
     def run(self):
         try:
-            # 兼容不同平台和环境的 asyncio 事件循环策略
             if sys.platform == "win32":
                 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             
@@ -184,10 +163,8 @@ class TTSWorker(QThread):
 class TTSApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('文字转语音工具 (纯Python版)')
+        self.setWindowTitle('文字转语音工具 (纯Python版 - 已修正)')
         self.setGeometry(300, 300, 1000, 850)
-        self.last_pause_insertion_position = -1
-        self.animation_index = 0
         self.player = QMediaPlayer()
         self.userIsInteracting = False
         
@@ -363,6 +340,8 @@ class TTSApp(QWidget):
         self.enableButtons(False)
         self.play_button.setEnabled(False)
 
+        self.animation_timer = QTimer(self)
+        self.animation_timer.timeout.connect(self.update_status_animation)
         self.animation_index = 0
         self.animation_timer.start(500)
 
