@@ -13,6 +13,7 @@ import edge_tts
 import subprocess
 import lameenc
 from xml.sax.saxutils import escape
+import tempfile
 
 OUTPUT_FILE = "output.mp3"
 DEFAULT_VOICE = {
@@ -78,6 +79,66 @@ XIAOXIAO_STYLES = {
 MAX_SEGMENT_LENGTH = 1000
 
 
+def call_nodejs_tts(segment, voice, rate, pitch, style):
+    """调用 Node.js 版本的 edge-tts（支持风格）"""
+    import tempfile
+    import json
+    
+    # 创建临时输出文件
+    temp_output = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+    temp_output.close()
+    
+    # 计算语速和音调值
+    scaled_rate = rate * 5
+    rate_str = f"{scaled_rate:+d}%"
+    
+    scaled_pitch = pitch * 5
+    pitch_str = f"{scaled_pitch:+d}Hz"
+    
+    # 构建命令
+    nodejs_script = os.path.join(os.path.dirname(__file__), 'tts_with_style.js')
+    
+    # 处理 None 风格
+    style_str = style if style else 'null'
+    
+    cmd = [
+        'node',
+        nodejs_script,
+        segment,
+        voice,
+        rate_str,
+        pitch_str,
+        style_str,
+        temp_output.name.replace('.mp3', '')  # toFile 会自动加 .mp3
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise Exception(f"Node.js TTS 失败: {result.stderr}")
+        
+        # 读取生成的音频文件
+        output_file = temp_output.name
+        if not os.path.exists(output_file):
+            output_file = temp_output.name.replace('.mp3', '') + '.mp3'
+        
+        with open(output_file, 'rb') as f:
+            audio_data = f.read()
+        
+        # 清理临时文件
+        try:
+            os.unlink(output_file)
+        except:
+            pass
+            
+        return audio_data
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("Node.js TTS 超时")
+    except Exception as e:
+        raise Exception(f"调用 Node.js TTS 失败: {str(e)}")
+
+
 async def process_text_segment(segment, voice, rate, pitch, style=None):
     """处理单个文本段落（不包括停顿）"""
     # 计算语速和音调值（-10~10 映射到 -50%~+50% 和 -50Hz~+50Hz）
@@ -87,30 +148,18 @@ async def process_text_segment(segment, voice, rate, pitch, style=None):
     scaled_pitch = pitch * 5
     pitch_str = f"{scaled_pitch:+d}Hz"
     
-    # 如果有风格，使用完整 SSML
+    # 如果有风格，使用 Node.js 版本（支持 SSML）
     if style:
-        escaped_text = escape(segment)
-        content_part = f"<prosody rate='{rate_str}' pitch='{pitch_str}'>{escaped_text}</prosody>"
-        content_part = f"<mstts:express-as style='{style}'>{content_part}</mstts:express-as>"
-        
-        final_ssml = (
-            f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
-            f"xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='zh-CN'>"
-            f"<voice name='{voice}'>"
-            f"{content_part}"
-            f"</voice>"
-            f"</speak>"
-        )
-        communicate = edge_tts.Communicate(final_ssml, voice=voice)
+        segment_audio = await asyncio.to_thread(call_nodejs_tts, segment, voice, rate, pitch, style)
+        return segment_audio
     else:
-        # 无风格，使用快捷参数
+        # 无风格，使用 Python edge-tts（快捷参数）
         communicate = edge_tts.Communicate(segment, voice=voice, rate=rate_str, pitch=pitch_str)
-    
-    segment_audio = b''
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            segment_audio += chunk["data"]
-    return segment_audio
+        segment_audio = b''
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                segment_audio += chunk["data"]
+        return segment_audio
 
 
 async def run_tts(text, voice, rate, pitch, style, finished_callback):
