@@ -11,7 +11,7 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtGui import QFont
 import edge_tts
 import lameenc
-from xml.sax.saxutils import escape
+from edge_tts import SubMaker  # 导入官方推荐的 SSML 构建工具
 
 # --- 全局设置 ---
 OUTPUT_FILE = "output.mp3"
@@ -96,32 +96,21 @@ def generate_silence(duration_ms, sample_rate=24000, bit_depth=16):
 
 async def process_text_segment(segment, voice, rate, pitch, style=None):
     """
-    【修正版本】处理单个文本段落，统一使用 SSML 支持风格和参数。
+    【最终修正版】使用官方 SubMaker 构建 SSML，确保风格、语速、音调被正确解析。
     """
-    # 将UI滑块值 (-10~10) 转换为 edge-tts 需要的百分比/赫兹格式
     rate_str = f"{rate * 5:+d}%"
     pitch_str = f"{pitch * 5:+d}Hz"
     
-    # 对文本中的特殊XML字符进行转义，防止SSML解析错误
-    escaped_segment = escape(segment)
+    # 使用 SubMaker 来安全地构建 SSML
+    sub_maker = SubMaker()
+    # add_sub 方法会自动处理 XML 转义和标签构建
+    sub_maker.add_sub(segment, voice=voice, rate=rate_str, pitch=pitch_str, style=style)
     
-    # 构建 SSML (语音合成标记语言) 文本
-    ssml_text = (
-        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
-        f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">'
-        f'<voice name="{voice}">'
-        f'<prosody rate="{rate_str}" pitch="{pitch_str}">'
-    )
+    # 将 SubMaker 对象转换为最终的 SSML 字符串
+    final_ssml = str(sub_maker)
     
-    if style:
-        ssml_text += f'<mstts:express-as style="{style}">{escaped_segment}</mstts:express-as>'
-    else:
-        ssml_text += escaped_segment
-        
-    ssml_text += '</prosody></voice></speak>'
-    
-    # 【修正点】在创建 Communicate 对象时传入 SSML 文本
-    communicate = edge_tts.Communicate(ssml_text)
+    # 在创建 Communicate 对象时传入 SSML 文本
+    communicate = edge_tts.Communicate(final_ssml)
     
     segment_audio = b''
     async for chunk in communicate.stream():
