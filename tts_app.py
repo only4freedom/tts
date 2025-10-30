@@ -57,23 +57,28 @@ DEFAULT_VOICE = {
 MAX_SEGMENT_LENGTH = 1000
 
 
-async def process_segment(segment, voice, rate, volume):
+async def process_segment(segment, voice, rate, pitch):
     """处理单个文本段落或停顿"""
     if re.match(r'\{pause=\d+\}', segment):
         pause_duration = int(re.search(r'\d+', segment).group())
         silence_bytes = await asyncio.to_thread(generate_silence, pause_duration)
         return silence_bytes
     else:
-        if rate >= 0:
-            rates = "+" + str(rate) + "%"
+        # 将 -10~10 映射到 -50%~+50%
+        scaled_rate = rate * 5
+        if scaled_rate >= 0:
+            rate_str = "+" + str(scaled_rate) + "%"
         else:
-            rates = str(rate) + "%"
-        if volume >= 0:
-            volumes = "+" + str(volume) + "%"
-        else:
-            volumes = str(volume) + "%"
+            rate_str = str(scaled_rate) + "%"
         
-        communicate = edge_tts.Communicate(segment, voice, rate=rates, volume=volumes)
+        # 将 -10~10 映射到 -50Hz~+50Hz
+        scaled_pitch = pitch * 5
+        if scaled_pitch >= 0:
+            pitch_str = "+" + str(scaled_pitch) + "Hz"
+        else:
+            pitch_str = str(scaled_pitch) + "Hz"
+        
+        communicate = edge_tts.Communicate(segment, voice, rate=rate_str, pitch=pitch_str)
         segment_audio = b''
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
@@ -81,7 +86,7 @@ async def process_segment(segment, voice, rate, volume):
         return segment_audio
 
 
-async def run_tts(text, voice, rate, volume, finished_callback):
+async def run_tts(text, voice, rate, pitch, finished_callback):
     """运行TTS转换"""
     segments = re.split(r'(\{pause=\d+\})', text)
     combined_audio = b''
@@ -93,7 +98,7 @@ async def run_tts(text, voice, rate, volume, finished_callback):
                 silence = await asyncio.to_thread(generate_silence, pause_duration)
                 combined_audio += silence
             elif segment.strip():  # 只处理非空段落
-                segment_audio = await process_segment(segment, voice, rate, volume)
+                segment_audio = await process_segment(segment, voice, rate, pitch)
                 combined_audio += segment_audio
 
         with open(OUTPUT_FILE, "wb") as f:
@@ -127,18 +132,18 @@ class TTSWorker(QThread):
     """TTS工作线程"""
     finished = pyqtSignal(str)
 
-    def __init__(self, text, voice, rate, volume):
+    def __init__(self, text, voice, rate, pitch):
         super().__init__()
         self.text = text
         self.voice = voice
         self.rate = rate
-        self.volume = volume
+        self.pitch = pitch
 
     def run(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(
-            run_tts(self.text, self.voice, self.rate, self.volume, 
+            run_tts(self.text, self.voice, self.rate, self.pitch, 
                    self.finished.emit)
         )
 
@@ -202,19 +207,19 @@ class TTSApp(QWidget):
         self.rate_label = QLabel('语速增减（0）')
         self.layout.addWidget(self.rate_label)
         self.rate_slider = QSlider(Qt.Horizontal)
-        self.rate_slider.setRange(-100, 100)
+        self.rate_slider.setRange(-10, 10)
         self.rate_slider.setValue(0)
         self.rate_slider.valueChanged.connect(self.update_rate_label)
         self.layout.addWidget(self.rate_slider)
 
         # 音调滑块
-        self.volume_label = QLabel('音调增减（0）')
-        self.layout.addWidget(self.volume_label)
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(-100, 100)
-        self.volume_slider.setValue(0)
-        self.volume_slider.valueChanged.connect(self.update_volume_label)
-        self.layout.addWidget(self.volume_slider)
+        self.pitch_label = QLabel('音调增减（0）')
+        self.layout.addWidget(self.pitch_label)
+        self.pitch_slider = QSlider(Qt.Horizontal)
+        self.pitch_slider.setRange(-10, 10)
+        self.pitch_slider.setValue(0)
+        self.pitch_slider.valueChanged.connect(self.update_pitch_label)
+        self.layout.addWidget(self.pitch_slider)
 
         # 按钮布局
         self.button_layout = QHBoxLayout()
@@ -278,9 +283,9 @@ class TTSApp(QWidget):
         """更新语速标签"""
         self.rate_label.setText(f'语速增减（{value}）')
 
-    def update_volume_label(self, value):
+    def update_pitch_label(self, value):
         """更新音调标签"""
-        self.volume_label.setText(f'音调增减（{value}）')
+        self.pitch_label.setText(f'音调增减（{value}）')
 
     def handle_error(self):
         """处理播放器错误"""
@@ -358,7 +363,7 @@ class TTSApp(QWidget):
         selected_voice_name = self.voice_dropdown.currentText()
         voice_id = DEFAULT_VOICE.get(selected_voice_name)
         rate = self.rate_slider.value()
-        volume = self.volume_slider.value()
+        pitch = self.pitch_slider.value()
 
         if text.strip() == "":
             self.status_label.setText("请输入一些文本！")
@@ -377,7 +382,7 @@ class TTSApp(QWidget):
         self.animation_index = 0
         self.animation_timer.start(500)
 
-        self.tts_thread = TTSWorker(text, voice_id, rate, volume)
+        self.tts_thread = TTSWorker(text, voice_id, rate, pitch)
         self.tts_thread.finished.connect(self.tts_finished)
         self.tts_thread.start()
 
