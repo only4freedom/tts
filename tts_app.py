@@ -78,44 +78,39 @@ XIAOXIAO_STYLES = {
 MAX_SEGMENT_LENGTH = 1000
 
 
-async def process_segment(segment, voice, rate, pitch, style=None):
-    """处理单个文本段落或停顿"""
-    if re.match(r'\{pause=\d+\}', segment):
-        pause_duration = int(re.search(r'\d+', segment).group())
-        silence_bytes = await asyncio.to_thread(generate_silence, pause_duration)
-        return silence_bytes
+async def process_text_segment(segment, voice, rate, pitch, style=None):
+    """处理单个文本段落（不包括停顿）"""
+    # 计算语速和音调值（-10~10 映射到 -50%~+50% 和 -50Hz~+50Hz）
+    scaled_rate = rate * 5
+    rate_str = f"{scaled_rate:+d}%"
+    
+    scaled_pitch = pitch * 5
+    pitch_str = f"{scaled_pitch:+d}Hz"
+    
+    # 如果有风格，使用完整 SSML
+    if style:
+        escaped_text = escape(segment)
+        content_part = f"<prosody rate='{rate_str}' pitch='{pitch_str}'>{escaped_text}</prosody>"
+        content_part = f"<mstts:express-as style='{style}'>{content_part}</mstts:express-as>"
+        
+        final_ssml = (
+            f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+            f"xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='zh-CN'>"
+            f"<voice name='{voice}'>"
+            f"{content_part}"
+            f"</voice>"
+            f"</speak>"
+        )
+        communicate = edge_tts.Communicate(final_ssml, voice=voice)
     else:
-        # 计算语速和音调值（-10~10 映射到 -50%~+50% 和 -50Hz~+50Hz）
-        scaled_rate = rate * 5
-        rate_str = f"{scaled_rate:+d}%"
-        
-        scaled_pitch = pitch * 5
-        pitch_str = f"{scaled_pitch:+d}Hz"
-        
-        # 如果有风格，使用完整 SSML
-        if style:
-            escaped_text = escape(segment)
-            content_part = f"<prosody rate='{rate_str}' pitch='{pitch_str}'>{escaped_text}</prosody>"
-            content_part = f"<mstts:express-as style='{style}'>{content_part}</mstts:express-as>"
-            
-            final_ssml = (
-                f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
-                f"xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='zh-CN'>"
-                f"<voice name='{voice}'>"
-                f"{content_part}"
-                f"</voice>"
-                f"</speak>"
-            )
-            communicate = edge_tts.Communicate(final_ssml, voice=voice)
-        else:
-            # 无风格，使用快捷参数
-            communicate = edge_tts.Communicate(segment, voice, rate=rate_str, pitch=pitch_str)
-        
-        segment_audio = b''
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                segment_audio += chunk["data"]
-        return segment_audio
+        # 无风格，使用快捷参数
+        communicate = edge_tts.Communicate(segment, voice=voice, rate=rate_str, pitch=pitch_str)
+    
+    segment_audio = b''
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            segment_audio += chunk["data"]
+    return segment_audio
 
 
 async def run_tts(text, voice, rate, pitch, style, finished_callback):
@@ -126,11 +121,13 @@ async def run_tts(text, voice, rate, pitch, style, finished_callback):
     try:
         for segment in segments:
             if re.match(r'\{pause=\d+\}', segment):
+                # 处理停顿
                 pause_duration = int(re.search(r'\d+', segment).group())
                 silence = await asyncio.to_thread(generate_silence, pause_duration)
                 combined_audio += silence
             elif segment.strip():  # 只处理非空段落
-                segment_audio = await process_segment(segment, voice, rate, pitch, style)
+                # 处理文本段落
+                segment_audio = await process_text_segment(segment, voice, rate, pitch, style)
                 combined_audio += segment_audio
 
         with open(OUTPUT_FILE, "wb") as f:
