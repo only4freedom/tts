@@ -103,11 +103,15 @@ async def process_text_segment(segment, voice, rate, pitch, style=None):
     
     # 使用 SubMaker 来安全地构建 SSML
     sub_maker = SubMaker()
-    # add_sub 方法会自动处理 XML 转义和标签构建
-    sub_maker.add_sub(segment, voice=voice, rate=rate_str, pitch=pitch_str, style=style)
+    
+    # 【修正点】使用 .append() 方法，而不是 .add_sub()
+    sub_maker.append(edge_tts.VoiceCommand(voice, rate=rate_str, pitch=pitch_str))
+    if style:
+        sub_maker.append(edge_tts.StyleCommand(style))
+    sub_maker.append(edge_tts.TextCommand(segment))
     
     # 将 SubMaker 对象转换为最终的 SSML 字符串
-    final_ssml = str(sub_maker)
+    final_ssml = sub_maker.to_ssml()
     
     # 在创建 Communicate 对象时传入 SSML 文本
     communicate = edge_tts.Communicate(final_ssml)
@@ -128,7 +132,7 @@ async def run_tts(text, voice, rate, pitch, style, finished_callback):
     
     try:
         for segment in segments:
-            if re.match(r'\{pause=\d+\}', segment):
+            if re.match(r'(\{pause=\d+\}', segment):
                 # 处理停顿
                 pause_duration = int(re.search(r'\d+', segment).group())
                 # 使用 to_thread 在异步函数中运行同步的 lameenc 代码
