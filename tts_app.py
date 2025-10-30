@@ -10,7 +10,6 @@ from PyQt5.QtCore import pyqtSlot, QThread, pyqtSignal, Qt, QUrl, QTimer
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtGui import QFont
 import edge_tts
-import lameenc
 from xml.sax.saxutils import escape
 
 # --- 全局设置 ---
@@ -78,8 +77,7 @@ XIAOXIAO_STYLES = {
 
 async def run_tts(text, voice, rate, pitch, style, finished_callback):
     """
-    【最终修正版】运行TTS转换。
-    这次，我们先构建一个完整的 SSML 字符串，再一次性传递给 Communicate。
+    【最终修正版】一次性构建完整的 SSML 字符串，然后传递给 Communicate 进行处理。
     """
     try:
         # 1. 将UI滑块值转换为SSML需要的格式
@@ -87,46 +85,46 @@ async def run_tts(text, voice, rate, pitch, style, finished_callback):
         pitch_str = f"{pitch * 5:+d}Hz"
 
         # 2. 构建SSML的开头部分
-        final_ssml = (
-            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
-            f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">'
-            f'<voice name="{voice}">'
-            # 将 prosody 标签包裹在最外层，控制全局语速和音调
-            f'<prosody rate="{rate_str}" pitch="{pitch_str}">'
-        )
-
+        final_ssml_body = ""
+        
         # 3. 智能地处理文本和停顿，插入到SSML中
         segments = re.split(r'(\{pause=\d+\})', text)
         for segment in segments:
             if re.match(r'(\{pause=\d+\})', segment):
                 # 插入SSML的停顿标签 <break>
                 pause_duration = int(re.search(r'\d+', segment).group())
-                final_ssml += f'<break time="{pause_duration}ms"/>'
+                final_ssml_body += f'<break time="{pause_duration}ms"/>'
             elif segment.strip():
                 # 对文本进行XML转义
                 escaped_segment = escape(segment)
                 # 如果有风格，则包裹风格标签
                 if style:
-                    final_ssml += f'<mstts:express-as style="{style}">{escaped_segment}</mstts:express-as>'
+                    final_ssml_body += f'<mstts:express-as style="{style}">{escaped_segment}</mstts:express-as>'
                 else:
-                    final_ssml += escaped_segment
+                    final_ssml_body += escaped_segment
         
-        # 4. 闭合所有SSML标签
-        final_ssml += '</prosody></voice></speak>'
+        # 4. 构建完整的SSML字符串
+        final_ssml = (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+            f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">'
+            f'<voice name="{voice}">'
+            f'<prosody rate="{rate_str}" pitch="{pitch_str}">'
+            f'{final_ssml_body}'
+            '</prosody></voice></speak>'
+        )
 
-        # 5. 将构建好的完整SSML字符串传递给Communicate
-        communicate = edge_tts.Communicate(final_ssml)
+        # 5. 【修正核心】创建空的 Communicate 对象，将 SSML 传递给 stream 方法
+        communicate = edge_tts.Communicate()
         
         # 6. 流式写入文件
         with open(OUTPUT_FILE, "wb") as f:
-            async for chunk in communicate.stream():
+            async for chunk in communicate.stream(final_ssml):
                 if chunk["type"] == "audio":
                     f.write(chunk["data"])
 
         finished_callback("语音生成完毕！")
 
     except Exception as e:
-        # 捕获并显示更详细的错误
         import traceback
         error_info = traceback.format_exc()
         print(error_info) # 在控制台打印详细错误，方便调试
